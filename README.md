@@ -4,6 +4,10 @@
 4. [Firewall and Security Groups](#firewall-and-security-groups)
 5. [Linux File System](#linux-file-system)
 6. [Linux Commands](#linux-commands)
+7. [Vim Editor](#vim-editor)
+8. [Linux User Management](#linux-user-management)
+9. [File Permissions and Ownership](#file-permissions-and-ownership)
+10. [SSH Configuration and Key-Based Auth Setup](#ssh-configuration-and-key-based-auth-setup)
 
 ## AWS — Regions and Availability Zones
 
@@ -358,6 +362,250 @@ Log reading      head, tail, tail -f
 Piping           |
 Redirection      >, >>
 Privileges       sudo su
+Editor           vim
+User mgmt        useradd, groupadd, usermod, passwd, id
+Permissions      chmod, chown
+SSH config       sshd -t, systemctl restart sshd
 ```
 
+---
 
+## Vim Editor
+
+`vim` is the standard terminal text editor on Linux servers. When there is no GUI, vim is how you edit files.
+
+```bash
+vim filename.txt    # open file (creates it if it does not exist)
+```
+
+Vim has two working modes:
+
+### Esc Mode (Navigation and Actions)
+
+Press `Esc` to enter this mode. Used for moving around and performing actions on text.
+
+```
+gg          go to the top of the file
+Shift+G     go to the bottom of the file
+u           undo the last change
+Ctrl+R      redo
+yy          copy the current line
+p           paste below the current line
+Shift+P     paste above the current line
+10p         paste 10 times
+```
+
+### Colon Mode (Commands)
+
+Type `:` from Esc mode to enter colon mode. Used for saving, searching, and replacing.
+
+```
+:w              save the file
+:wq             save and quit
+:q              quit (only works if there are no unsaved changes)
+:q!             force quit — discard all changes
+
+:set nu         show line numbers
+:set nonu       hide line numbers
+:20             jump to line 20
+
+:/word          search forward for "word" — press n for the next match
+:?word          search backward for "word"
+:noh            clear the search highlight
+
+:4d             delete line 4
+:2,5d           delete lines 2 to 5
+:%d             delete all lines in the file
+
+:4s/old/new         replace first occurrence of "old" with "new" on line 4
+:4s/old/new/g       replace all occurrences on line 4
+:%s/old/new         replace first occurrence on every line
+:%s/old/new/g       replace all occurrences everywhere in the file
+```
+
+> To type text, press `i` to enter Insert mode. When done, press `Esc` to go back to Esc mode, then `:wq` to save and exit.
+
+---
+
+## Linux User Management
+
+On a real server, you never give everyone the root login. You create separate users, assign them to groups, and control exactly what each group is allowed to do. This is the same idea as IAM (Identity and Access Management) in AWS.
+
+```
+User  → an individual account (ramesh, john, deploy-bot)
+Group → a collection of users (devops-team, developers, admins)
+Role  → the level of access (read-only, read-write, admin)
+```
+
+A real example:
+
+| Group | Access |
+|---|---|
+| `devops-trainee` | Read only |
+| `devops-juniors` | Read + limited writes |
+| `devops-seniors` | Read + write + update |
+| `devops-leads` | Full — read, write, update, delete |
+
+### Creating Users and Groups
+
+Every Linux user must belong to exactly one **primary group** and can optionally belong to additional **secondary groups**.
+
+```bash
+useradd ramesh              # create user — also creates a group named "ramesh"
+id ramesh                   # show user ID, primary group, and all secondary groups
+passwd ramesh               # set or change the password for ramesh
+
+groupadd devops-team        # create a new group
+```
+
+User information is stored in two files:
+- `/etc/passwd` — all users and their home directories
+- `/etc/group` — all groups and their members
+
+### Managing Group Membership
+
+```bash
+usermod -g devops-team ramesh       # set devops-team as ramesh's primary group
+usermod -G devops-team ramesh       # set devops-team as a secondary group (replaces existing secondary groups)
+usermod -aG devops-team ramesh      # append devops-team as a secondary group (safe — does not remove existing ones)
+```
+
+Use `-aG` when adding a user to a new group — it appends rather than replaces.
+
+### Giving Sudo Access
+
+`sudo` lets a normal user run commands as root. There are two ways to grant it:
+
+**Option 1 — Add to the wheel group** (simplest):
+```bash
+usermod -aG wheel ramesh     # ramesh can now run any command with sudo
+```
+
+**Option 2 — Custom group permissions in `/etc/sudoers`** (fine-grained):
+```bash
+# Add this line to /etc/sudoers to allow the devops-user-managers group
+# to only run useradd and usermod — nothing else
+%devops-user-managers    ALL=(ALL)    /usr/sbin/useradd, /usr/sbin/usermod
+```
+
+To remove a user from a group:
+```bash
+gpasswd -d ramesh wheel     # remove ramesh from the wheel group
+```
+
+---
+
+## File Permissions and Ownership
+
+Every file and directory on Linux has three permission sets and an owner.
+
+### Reading Permission Notation
+
+```
+-rw-r--r--  1  ramesh  devops  1024  May 7 10:00  notes.txt
+```
+
+Breaking down `-rw-r--r--`:
+
+```
+-   rw-       r--        r--
+|   |         |          |
+|   owner(u)  group(g)   others(o)
+|
+file type: - = file, d = directory
+```
+
+Each position can be `r` (read), `w` (write), `x` (execute), or `-` (no permission).
+
+### chmod — Changing Permissions
+
+**Symbolic method** — add or remove specific permissions:
+```bash
+chmod g+w notes.txt      # give the group write permission
+chmod o-r notes.txt      # remove read permission from others
+chmod u+x deploy.sh      # give the owner execute permission
+```
+
+**Numeric method** — set all permissions at once using numbers:
+
+| Permission | Value |
+|---|---|
+| r (read) | 4 |
+| w (write) | 2 |
+| x (execute) | 1 |
+
+Add the values for each group — owner, group, others — and combine:
+
+```bash
+chmod 640 notes.txt     # owner: rw- (6), group: r-- (4), others: --- (0)
+chmod 700 .ssh          # owner: rwx (7), group: --- (0), others: --- (0)
+chmod 600 authorized_keys   # owner: rw- (6), group: --- (0), others: --- (0)
+```
+
+Common combinations: `755` (owner full, everyone else read+execute), `644` (owner read+write, everyone else read-only), `600` (owner only).
+
+### chown — Changing Ownership
+
+Only the root user can change file ownership.
+
+```bash
+chown ramesh notes.txt              # change owner to ramesh
+chown ramesh:devops notes.txt       # change owner to ramesh and group to devops
+chown -R ramesh:ramesh /home/ramesh # change owner recursively for entire directory
+```
+
+`-R` applies the change to everything inside the directory, including all subdirectories and files.
+
+---
+
+## SSH Configuration and Key-Based Auth Setup
+
+### SSH Server Configuration
+
+The SSH server's behavior is controlled by `/etc/ssh/sshd_config`. This is where you enable or disable password login, change the default port, and more.
+
+```bash
+# By default, Amazon Linux disables password authentication
+# This line in /etc/ssh/sshd_config controls it:
+PasswordAuthentication no
+```
+
+After editing `sshd_config`, always check the syntax before restarting:
+```bash
+sshd -t                     # test config file for syntax errors — no output means it is clean
+systemctl restart sshd      # apply the changes by restarting the SSH service
+```
+
+If `sshd -t` reports an error, fix it before restarting — a broken config can lock everyone out of the server.
+
+### Setting Up Key-Based Auth for a New User
+
+When you create a new user (e.g., `ramesh`) and want them to connect via SSH key:
+
+1. **The user generates their key pair** on their own machine:
+   ```bash
+   ssh-keygen -f ramesh-key
+   ```
+
+2. **The user sends only their public key** (`ramesh-key.pub`) to the admin. Never the private key.
+
+3. **The admin sets up the `.ssh` directory** on the server under the user's home:
+   ```bash
+   mkdir /home/ramesh/.ssh
+   touch /home/ramesh/.ssh/authorized_keys
+   # paste the public key content into authorized_keys
+   ```
+
+4. **Set the correct permissions** — SSH will refuse to use keys if permissions are too open:
+   ```bash
+   chmod 700 /home/ramesh/.ssh
+   chmod 600 /home/ramesh/.ssh/authorized_keys
+   chown -R ramesh:ramesh /home/ramesh/.ssh
+   ```
+
+5. **The user connects**:
+   ```bash
+   ssh -i ramesh-key ramesh@<server-ip>
+   ```
+
+The permission and ownership requirements for `.ssh` are strict by design — if anyone other than the owner can read or write those files, SSH treats the keys as compromised and refuses the connection.
