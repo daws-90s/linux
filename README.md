@@ -8,6 +8,13 @@
 8. [Linux User Management](#linux-user-management)
 9. [File Permissions and Ownership](#file-permissions-and-ownership)
 10. [SSH Configuration and Key-Based Auth Setup](#ssh-configuration-and-key-based-auth-setup)
+11. [tar — Archiving and Compression](#tar--archiving-and-compression)
+12. [find — Searching Files](#find--searching-files)
+13. [Removing a User Safely](#removing-a-user-safely)
+14. [Package Management](#package-management)
+15. [Service Management](#service-management)
+16. [Process Management](#process-management)
+17. [Network Management](#network-management)
 
 ## AWS — Regions and Availability Zones
 
@@ -609,3 +616,212 @@ When you create a new user (e.g., `ramesh`) and want them to connect via SSH key
    ```
 
 The permission and ownership requirements for `.ssh` are strict by design — if anyone other than the owner can read or write those files, SSH treats the keys as compromised and refuses the connection.
+
+---
+
+## tar — Archiving and Compression
+
+Linux uses `.tar.gz` as its standard archive format (Windows uses `.zip`).
+
+```
+.zip    → Windows format
+.tar.gz → Linux standard format
+```
+
+**Create an archive:**
+
+```bash
+tar -czf archive.tar.gz files-or-folders/
+```
+
+| Flag | Meaning |
+|---|---|
+| `c` | Create a new archive |
+| `z` | Compress using gzip (`.gz`) |
+| `f` | Next argument is the filename |
+| `v` | Verbose — print each file as it is added |
+
+**Extract an archive:**
+
+```bash
+tar -xzf archive.tar.gz               # extract into current directory (creates a subfolder)
+tar -xzf archive.tar.gz -C /app       # extract into /app (creates a subfolder inside)
+tar -xzf archive.tar.gz -C /app --strip-components=1   # extract files directly, no subfolder
+```
+
+**Exclude a folder while creating:**
+
+```bash
+tar -czf backend.tar.gz --exclude=node_modules .
+```
+
+> Always `cd` into the folder before archiving with `.` — this avoids the parent folder being baked into the archive, so extraction lands files directly without a subfolder.
+
+---
+
+## find — Searching Files
+
+`find` searches the filesystem for files and directories matching conditions.
+
+```bash
+find <where-to-search> <conditions>
+```
+
+```bash
+find / -iname "*.log"              # find all .log files anywhere (case-insensitive)
+find /etc -name "nginx.conf"       # find a specific file under /etc
+find / -type d -name "devops"      # find a directory named "devops"
+find /app -type f -name "*.js"     # find all .js files under /app
+find /tmp -mtime +7                # find files not modified in more than 7 days
+```
+
+| Flag | Meaning |
+|---|---|
+| `-name` | Match filename (case-sensitive) |
+| `-iname` | Match filename (case-insensitive) |
+| `-type f` | Regular files only |
+| `-type d` | Directories only |
+| `-mtime +N` | Modified more than N days ago |
+
+---
+
+## Removing a User Safely
+
+Never just delete a user without following a proper process — they may be logged in or running processes.
+
+**Step-by-step:**
+
+1. **Check if the user is logged in:**
+   ```bash
+   who | grep ramesh
+   ```
+
+2. **Kill all their running processes:**
+   ```bash
+   pkill -u ramesh
+   ```
+
+3. **Remove them from all groups:**
+   ```bash
+   gpasswd -d ramesh <groupname>
+   ```
+
+4. **Check for sudoers entries:**
+   ```bash
+   grep ramesh /etc/sudoers
+   ls /etc/sudoers.d/
+   ```
+
+5. **Back up their home directory:**
+   ```bash
+   tar -czf /backup/ramesh-home.tar.gz /home/ramesh
+   ```
+
+6. **Delete the user and their home directory:**
+   ```bash
+   userdel -r ramesh
+   ```
+
+`userdel -r` removes the user account and their home directory together. Without `-r`, the home directory is left behind.
+
+---
+
+## Package Management
+
+On RedHat-based systems (RHEL, CentOS, Amazon Linux), the package manager is `dnf`. On Debian/Ubuntu it is `apt-get`. The concepts are identical — only the command name differs.
+
+```bash
+dnf install <package-name>       # install a package
+dnf remove <package-name>        # uninstall a package
+dnf update <package-name>        # update a specific package
+dnf search <package-name>        # search available packages by name
+dnf info <package-name>          # show details about a package
+
+dnf list installed               # all installed packages
+dnf list installed | grep nginx  # check if a specific package is installed
+dnf list available               # packages available in repos but not yet installed
+dnf repolist                     # list all configured repositories
+```
+
+**Module management** — some packages come in multiple versions via modules:
+
+```bash
+dnf module list                  # list all available modules and versions
+dnf module disable nodejs -y     # disable the default version
+dnf module enable nodejs:20 -y   # enable a specific version
+dnf install nodejs -y            # install the enabled version
+```
+
+---
+
+## Service Management
+
+A **service** (also called a daemon) is a process that runs continuously in the background — `sshd`, `nginx`, `mysqld`, `backend` are all services. `systemctl` is the tool to manage them.
+
+```bash
+systemctl start nginx        # start the service now
+systemctl stop nginx         # stop the service now
+systemctl restart nginx      # stop then start (apply config changes)
+systemctl status nginx       # show whether it is running and recent logs
+systemctl enable nginx       # auto-start on boot — survives a reboot
+systemctl disable nginx      # remove auto-start on boot
+```
+
+**Always enable a service after starting it** — if you only `start` without `enable`, the service will stop the next time the server reboots.
+
+To check logs of a service:
+
+```bash
+journalctl -u nginx -f       # follow live logs
+journalctl -u nginx --since "10 min ago"
+```
+
+---
+
+## Process Management
+
+Every running program on Linux is a **process**. Each process gets a unique **PID** (Process ID). Processes can spawn child processes — each child knows its parent via **PPID** (Parent Process ID).
+
+```bash
+ps                    # list processes for the current logged-in user
+ps aux                # list all processes with username, CPU, and memory
+ps -ef                # list all processes with PID and PPID
+ps -ef | grep nginx   # find a specific process by name
+```
+
+**Background vs Foreground:**
+- **Foreground** — the process holds the terminal; you cannot type other commands until it finishes
+- **Background** — runs independently; terminal is free immediately
+
+```bash
+kill <PID>       # graceful shutdown — asks the process to stop cleanly
+kill -9 <PID>    # force kill — immediately terminates with no cleanup
+pkill -u ramesh  # kill all processes owned by user ramesh
+```
+
+> Use `kill` (graceful) first. Only use `kill -9` if the process does not respond — it gives the process no chance to clean up open files or connections.
+
+---
+
+## Network Management
+
+```bash
+netstat -lntp     # list all open ports with the process listening on each
+```
+
+| Flag | Meaning |
+|---|---|
+| `l` | Listening ports only |
+| `n` | Show port numbers (not service names) |
+| `t` | TCP connections only |
+| `p` | Show the PID and process name |
+
+**Typical troubleshooting pattern:**
+
+```bash
+systemctl status nginx          # is the service running?
+netstat -lntp | grep 80         # is port 80 actually open?
+ps -ef | grep nginx             # is the nginx process alive?
+```
+
+Use these three together to diagnose any service that is not responding.
